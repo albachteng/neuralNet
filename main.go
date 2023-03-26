@@ -1,32 +1,84 @@
-package neuralnet
+package main
 
 import (
+	"encoding/csv"
 	"errors"
+	"fmt"
+	"log"
 	"math"
 	"math/rand"
+	"os"
+	"strconv"
 	"time"
 
 	"gonum.org/v1/gonum/floats"
 	"gonum.org/v1/gonum/mat"
 )
 
+func main() {
+
+	// training
+	trainingLabels, trainingInputs := getLabelsAndInputs("./train.csv")
+	config := neuralNetConfig{
+		inputNeurons:  4,
+		outputNeurons: 3,
+		hiddenNeurons: 3,
+		numEpochs:     5000,
+		learningRate:  0.3,
+	}
+
+	network := newNetwork(config)
+	if err := network.train(trainingInputs, trainingLabels); err != nil {
+		log.Fatal(err)
+	}
+
+	// testing
+	testLabels, testingInputs := getLabelsAndInputs("./test.csv")
+
+	predictions, err := network.predict(testingInputs)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+  // calculate accuracy
+  var truePosNeg int
+  numPreds, _ := predictions.Dims()
+  for i := 0; i < numPreds; i++ {
+    labelRow := mat.Row(nil, i, testLabels)
+    var species int
+    for idx, label := range labelRow {
+      if label == 1.0 {
+        species = idx
+        break
+      }
+    }
+    if predictions.At(i, species) == floats.Max(mat.Row(nil, i, predictions)) {
+      truePosNeg++
+    }
+  }
+
+  accuracy := float64(truePosNeg)/float64(numPreds)
+  fmt.Printf("\naccuracy = %0.2f\n\n", accuracy)
+
+}
+
 type neuralNet struct {
-	config  neuralNetConfig
-  // hidden layer weight matrix
+	config neuralNetConfig
+	// hen layer weight matrix
 	wHidden *mat.Dense
-  // hidden layer bias matrix (trainable constant values)
+	// hidden layer b        ias matrix (trainable constant values)
 	bHidden *mat.Dense
-  // output layer weight matrix
-	wOut    *mat.Dense
-  // output layer bias matrix
-	bOut    *mat.Dense
+	// output layer weight matrix
+	wOut *mat.Dense
+	// output layer bias matrix
+	bOut *mat.Dense
 }
 
 type neuralNetConfig struct {
 	inputNeurons  int // # of nodes
 	outputNeurons int
 	hiddenNeurons int
-	numEpochs     int // how many generations to train
+	numEpochs     int     // how many generations to train
 	learningRate  float64 // ? variance
 }
 
@@ -96,7 +148,7 @@ func (nn *neuralNet) backpropagate(x, y, wHidden, bHidden, wOut, bOut, output *m
 
 		outputLayerInput := new(mat.Dense)
 		outputLayerInput.Mul(hiddenLayerActivations, wOut)
-		addBOut := func(_, col int, v float64) float64 { return v + nn.bOut.At(0, col) }
+		addBOut := func(_, col int, v float64) float64 { return v + bOut.At(0, col) }
 		outputLayerInput.Apply(addBOut, outputLayerInput)
 		output.Apply(applySigmoid, outputLayerInput)
 
@@ -192,7 +244,7 @@ func (nn *neuralNet) predict(x *mat.Dense) (*mat.Dense, error) {
 
 	hiddenLayerActivations := new(mat.Dense)
 	applySigmoid := func(_, _ int, v float64) float64 { return sigmoid(v) }
-	hiddenLayerActivations.Apply(applySigmoid, hiddenLayerActivations)
+	hiddenLayerActivations.Apply(applySigmoid, hiddenLayerInput)
 
 	outputLayerInput := new(mat.Dense)
 	outputLayerInput.Mul(hiddenLayerActivations, nn.wOut)
@@ -201,4 +253,54 @@ func (nn *neuralNet) predict(x *mat.Dense) (*mat.Dense, error) {
 	output.Apply(applySigmoid, outputLayerInput)
 
 	return output, nil
+}
+
+func getLabelsAndInputs(path string) (labels, inputs *mat.Dense) {
+
+	// open training data set
+	f, err := os.Open(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+
+	// csv reader
+	reader := csv.NewReader(f)
+	reader.FieldsPerRecord = 7
+
+	rawCSVData, err := reader.ReadAll()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	inputsData := make([]float64, 4*len(rawCSVData))
+	labelsData := make([]float64, 3*len(rawCSVData))
+
+	var inputsIndex, labelsIndex int
+
+	for idx, record := range rawCSVData {
+		if idx == 0 {
+			continue
+		}
+		for i, val := range record {
+			parsedVal, err := strconv.ParseFloat(val, 64)
+			if err != nil {
+				log.Fatal(err)
+			}
+			//add to labelsData if relevant
+			if i == 4 || i == 5 || i == 6 {
+				labelsData[labelsIndex] = parsedVal
+				labelsIndex++
+				continue
+			}
+			inputsData[inputsIndex] = parsedVal
+			inputsIndex++
+		}
+	}
+
+	inputs = mat.NewDense(len(rawCSVData), 4, inputsData)
+	labels = mat.NewDense(len(rawCSVData), 3, labelsData)
+
+	return labels, inputs
+
 }

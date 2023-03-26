@@ -1,4 +1,4 @@
-module github.com/albachteng/neuralNet
+module github.com/albachteng/main
 
 go 1.19
 
